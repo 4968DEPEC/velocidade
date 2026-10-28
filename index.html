@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101820">
+  <title>Velocidade do carro</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #101820;
+      color: #f5f7fa;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px 16px;
+      display: grid;
+      place-items: center;
+    }
+
+    main {
+      width: min(100%, 440px);
+      padding: 24px;
+      border: 1px solid #293744;
+      border-radius: 24px;
+      background: #17232d;
+      box-shadow: 0 18px 50px #0005;
+    }
+
+    h1 { margin: 0; font-size: 1.4rem; }
+    .subtitle { margin: 6px 0 24px; color: #aab8c4; }
+
+    .speed-card {
+      padding: 24px 16px;
+      border-radius: 18px;
+      background: #0e171e;
+      text-align: center;
+    }
+
+    .speed {
+      font-size: clamp(4.5rem, 24vw, 7rem);
+      font-weight: 750;
+      line-height: 1;
+      letter-spacing: -0.07em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .unit { margin-top: 8px; color: #aab8c4; }
+    .status { min-height: 1.5em; margin: 18px 0 0; color: #8dd9b3; }
+    .status.error { color: #ff9a9a; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin: 18px 0;
+    }
+
+    .stat {
+      padding: 14px;
+      border-radius: 14px;
+      background: #202f3a;
+    }
+
+    .label { display: block; color: #aab8c4; font-size: .85rem; }
+    .value { display: block; margin-top: 5px; font-size: 1.2rem; font-weight: 650; }
+
+    .actions { display: flex; gap: 10px; }
+
+    button {
+      min-height: 50px;
+      flex: 1;
+      border: 0;
+      border-radius: 12px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:focus-visible { outline: 3px solid #8dd9b3; outline-offset: 3px; }
+    #start { background: #8dd9b3; color: #10251c; }
+    #stop { background: #344653; color: #f5f7fa; }
+    button:disabled { cursor: not-allowed; opacity: .48; }
+
+    .note { margin: 16px 0 0; color: #aab8c4; font-size: .8rem; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Velocidade do carro</h1>
+    <p class="subtitle">Medição pelo GPS do celular</p>
+
+    <section class="speed-card" aria-label="Velocidade atual">
+      <div id="speed" class="speed" aria-live="polite">--</div>
+      <div class="unit">km/h</div>
+      <p id="status" class="status" role="status">Pronto para iniciar</p>
+    </section>
+
+    <section class="stats" aria-label="Resumo da viagem">
+      <div class="stat"><span class="label">Tempo</span><strong id="duration" class="value">00:00:00</strong></div>
+      <div class="stat"><span class="label">Distância</span><strong id="distance" class="value">0,00 km</strong></div>
+      <div class="stat"><span class="label">Velocidade média</span><strong id="average" class="value">0 km/h</strong></div>
+      <div class="stat"><span class="label">Velocidade máxima</span><strong id="maximum" class="value">0 km/h</strong></div>
+    </section>
+
+    <div class="actions">
+      <button id="start" type="button">Iniciar medição</button>
+      <button id="stop" type="button" disabled>Encerrar</button>
+    </div>
+
+    <p class="note">Mantenha esta página aberta durante a medição. O GPS pode oscilar ou perder sinal; use o velocímetro do veículo como referência. A localização não é salva nem enviada.</p>
+  </main>
+
+  <script>
+    const speedElement = document.querySelector("#speed");
+    const durationElement = document.querySelector("#duration");
+    const distanceElement = document.querySelector("#distance");
+    const averageElement = document.querySelector("#average");
+    const maximumElement = document.querySelector("#maximum");
+    const statusElement = document.querySelector("#status");
+    const startButton = document.querySelector("#start");
+    const stopButton = document.querySelector("#stop");
+
+    let watchId = null;
+    let timerId = null;
+    let startedAt = 0;
+    let distanceMeters = 0;
+    let maximumSpeed = 0;
+    let lastPosition = null;
+    let latestSpeed = 0;
+
+    function formatDuration(milliseconds) {
+      const totalSeconds = Math.floor(milliseconds / 1000);
+      const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
+      const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
+      const seconds = String(totalSeconds % 60).padStart(2, "0");
+      return `${hours}:${minutes}:${seconds}`;
+    }
+
+    function renderStats() {
+      const elapsed = Date.now() - startedAt;
+      durationElement.textContent = formatDuration(elapsed);
+      distanceElement.textContent = `${(distanceMeters / 1000).toFixed(2).replace(".", ",")} km`;
+      averageElement.textContent = `${(elapsed > 0 ? distanceMeters / (elapsed / 1000) * 3.6 : 0).toFixed(1).replace(".", ",")} km/h`;
+      maximumElement.textContent = `${maximumSpeed.toFixed(1).replace(".", ",")} km/h`;
+    }
+
+    function distanceBetween(first, second) {
+      const radians = degrees => degrees * Math.PI / 180;
+      const earthRadius = 6371000;
+      const latitudeDelta = radians(second.latitude - first.latitude);
+      const longitudeDelta = radians(second.longitude - first.longitude);
+      const value = Math.sin(latitudeDelta / 2) ** 2
+        + Math.cos(radians(first.latitude)) * Math.cos(radians(second.latitude))
+        * Math.sin(longitudeDelta / 2) ** 2;
+      return earthRadius * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+    }
+
+    function showError(error) {
+      const messages = {
+        1: "Permissão de localização negada. Autorize o acesso à localização no navegador.",
+        2: "Não foi possível obter a localização. Verifique o sinal do GPS.",
+        3: "O GPS demorou para responder. Tente novamente."
+      };
+      statusElement.textContent = messages[error.code] || "Ocorreu um erro ao acessar o GPS.";
+      statusElement.classList.add("error");
+      stopMeasurement();
+    }
+
+    function onPosition(position) {
+      const { latitude, longitude, accuracy, speed } = position.coords;
+      const current = { latitude, longitude, timestamp: position.timestamp };
+      let speedMetersPerSecond = Number.isFinite(speed) ? speed : null;
+
+      if (lastPosition && accuracy <= 50) {
+        const traveled = distanceBetween(lastPosition, current);
+        const elapsedSeconds = (current.timestamp - lastPosition.timestamp) / 1000;
+        if (elapsedSeconds > 0 && traveled <= elapsedSeconds * 80 + 20) {
+          distanceMeters += traveled;
+          if (speedMetersPerSecond === null) {
+            speedMetersPerSecond = traveled / elapsedSeconds;
+          }
+        }
+      }
+
+      if (accuracy <= 50) lastPosition = current;
+      latestSpeed = speedMetersPerSecond === null ? 0 : speedMetersPerSecond * 3.6;
+      maximumSpeed = Math.max(maximumSpeed, latestSpeed);
+      speedElement.textContent = latestSpeed.toFixed(0);
+      statusElement.textContent = `GPS ativo · precisão aproximada de ${Math.round(accuracy)} m`;
+      statusElement.classList.remove("error");
+      renderStats();
+    }
+
+    function stopMeasurement() {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (timerId !== null) window.clearInterval(timerId);
+      watchId = null;
+      timerId = null;
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      if (!statusElement.classList.contains("error")) {
+        statusElement.textContent = "Medição encerrada";
+      }
+    }
+
+    function startMeasurement() {
+      if (!("geolocation" in navigator)) {
+        statusElement.textContent = "Este navegador não oferece suporte à localização.";
+        statusElement.classList.add("error");
+        return;
+      }
+
+      if (!window.isSecureContext) {
+        statusElement.textContent = "Abra esta página em HTTPS para permitir o acesso ao GPS.";
+        statusElement.classList.add("error");
+        return;
+      }
+
+      distanceMeters = 0;
+      maximumSpeed = 0;
+      latestSpeed = 0;
+      lastPosition = null;
+      startedAt = Date.now();
+      speedElement.textContent = "--";
+      statusElement.textContent = "Aguardando sinal do GPS...";
+      statusElement.classList.remove("error");
+      startButton.disabled = true;
+      stopButton.disabled = false;
+      renderStats();
+      timerId = window.setInterval(renderStats, 1000);
+      watchId = navigator.geolocation.watchPosition(onPosition, showError, {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 20000
+      });
+    }
+
+    startButton.addEventListener("click", startMeasurement);
+    stopButton.addEventListener("click", stopMeasurement);
+  </script>
+</body>
+</html>
