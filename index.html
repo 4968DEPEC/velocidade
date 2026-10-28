@@ -174,15 +174,16 @@
 
     function onPosition(position) {
       const { latitude, longitude, accuracy, speed } = position.coords;
-      const current = { latitude, longitude, timestamp: position.timestamp };
-      let speedMetersPerSecond = Number.isFinite(speed) ? speed : null;
+      const current = { latitude, longitude, accuracy, timestamp: position.timestamp };
+      let speedMetersPerSecond = Number.isFinite(speed) && speed > 0 ? speed : null;
 
       if (lastPosition && accuracy <= 50) {
         const traveled = distanceBetween(lastPosition, current);
         const elapsedSeconds = (current.timestamp - lastPosition.timestamp) / 1000;
         if (elapsedSeconds > 0 && traveled <= elapsedSeconds * 80 + 20) {
           distanceMeters += traveled;
-          if (speedMetersPerSecond === null) {
+          const movementThreshold = Math.max(2, (lastPosition.accuracy + accuracy) * 0.25);
+          if (speedMetersPerSecond === null && traveled > movementThreshold) {
             speedMetersPerSecond = traveled / elapsedSeconds;
           }
         }
